@@ -153,7 +153,7 @@ ttl's on request to verify the request is not old:
 If you generated a nonce in the client, you can verify the nonce matches the timestamp:
 
 ``` ruby
-    ApiAuth.authentic?(signed_request, secret_key, :check_nonce=>true) #in seconds
+    ApiAuth.authentic?(signed_request, secret_key, :check_nonce=>true)
 ```
 
 If your server is a Rails app, the signed request will be the `request` object.
