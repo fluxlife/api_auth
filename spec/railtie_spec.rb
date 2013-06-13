@@ -98,9 +98,10 @@ describe "Rails integration" do
       timestamp = Time.parse("Mon, 23 Jan 1984 03:29:56 GMT")
       Time.should_receive(:now).at_least(1).times.and_return(timestamp)
       ActiveResource::HttpMock.respond_to do |mock|
-        mock.get "/test_resources/1.xml", 
+        mock.get "/tests/1.xml", 
           {
-            'Authorization' => 'APIAuth 1044:IbTx7VzSOGU55HNbV4y2jZDnVis=',
+            # 'Authorization' => 'APIAuth 1044:IbTx7VzSOGU55HNbV4y2jZDnVis=', #old style signature
+            'Authorization' => "APIAuth 1044:loT+UlHE2D8YpeR3dQUyZ2isweI=",
             'Accept' => 'application/xml',
             'DATE' => "Mon, 23 Jan 1984 03:29:56 GMT"
           },

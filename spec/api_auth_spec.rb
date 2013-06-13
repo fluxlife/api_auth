@@ -40,7 +40,13 @@ describe "ApiAuth" do
           'content-type' => 'text/plain', 
           'content-md5' => '1B2M2Y8AsgTpgAmY7PhCfg==',
           'date' => Time.now.utc.httpdate)
+        @request_with_nonce = Net::HTTP::Put.new("/resource.xml?foo=bar&bar=foo", 
+          'content-type' => 'text/plain', 
+          'content-md5' => '1B2M2Y8AsgTpgAmY7PhCfg==',
+          'date' => Time.now.utc.httpdate)
+
         @signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+        @signed_request_with_nonce = ApiAuth.sign!(@request_with_nonce, @access_id, @secret_key, :use_nonce=>true)
       end
 
       it "should return a Net::HTTP object after signing it" do
@@ -54,7 +60,8 @@ describe "ApiAuth" do
               'content-type' => 'text/plain',
               'date' => "Mon, 23 Jan 1984 03:29:56 GMT")
             signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
-            signed_request['Content-MD5'].should == Digest::MD5.base64digest('')
+            # signed_request['Content-MD5'].should == Digest::MD5.base64digest('') => Doesn't work in ruby 1.8.7
+            signed_request['Content-MD5'].should == Base64.encode64(Digest::MD5.digest('')).strip
           end
 
           it "should calculate for real content" do
@@ -63,7 +70,8 @@ describe "ApiAuth" do
               'date' => "Mon, 23 Jan 1984 03:29:56 GMT")
             request.body = "hello\nworld"
             signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
-            signed_request['Content-MD5'].should == Digest::MD5.base64digest("hello\nworld")
+            # signed_request['Content-MD5'].should == Digest::MD5.base64digest("hello\nworld") => Doesn't work in ruby 1.8.7
+            signed_request['Content-MD5'].should == Base64.encode64(Digest::MD5.digest("hello\nworld")).strip
           end
         end
 
@@ -76,12 +84,26 @@ describe "ApiAuth" do
         @signed_request['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request)}"
       end
 
+      it "should sign the request with a nonce" do
+        @signed_request_with_nonce['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request)}&NONCE:#{ApiAuth.generate_nonce(@request, @secret_key)}"
+      end
+
       it "should authenticate a valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key).should be_true
       end
 
+      it "should authenticate a valid request with a nonce" do
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key, :check_nonce=>true).should be_true
+      end
+
       it "should NOT authenticate a non-valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key+'j').should be_false
+      end
+
+      it "should NOT authenticate a valid request with an invalid nonce" do
+        @signed_request_with_nonce["DATE"] = 1.second.from_now.utc.httpdate
+        puts @signed_request_with_nonce["DATE"]
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key).should be_false
       end
 
       it "should NOT authenticate a mismatched content-md5 when body has changed" do
@@ -98,6 +120,12 @@ describe "ApiAuth" do
         @request['Date'] = 16.minutes.ago.utc.httpdate
         signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
         ApiAuth.authentic?(signed_request, @secret_key).should be_false
+      end
+
+      it "should NOT authenticate a custom expired request" do
+        @request['Date'] = 5.minutes.ago.utc.httpdate
+        signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+        ApiAuth.authentic?(signed_request, @secret_key, :ttl=>4.minutes.to_i).should be_false
       end
       
       it "should retrieve the access_id" do
@@ -131,7 +159,8 @@ describe "ApiAuth" do
               :headers => headers,
               :method => :put)
             signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
-            signed_request.headers['Content-MD5'].should == Digest::MD5.base64digest('')
+            # signed_request.headers['Content-MD5'].should == Digest::MD5.base64digest('') => Doesn't work in ruby 1.8.7
+            signed_request.headers['Content-MD5'].should == Base64.encode64(Digest::MD5.digest('')).strip
           end
 
           it "should calculate for real content" do
@@ -142,7 +171,8 @@ describe "ApiAuth" do
               :method => :put,
               :payload => "hellow\nworld")
             signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
-            signed_request.headers['Content-MD5'].should == Digest::MD5.base64digest("hellow\nworld")
+            # signed_request.headers['Content-MD5'].should == Digest::MD5.base64digest("hellow\nworld") => Doesn't work in ruby 1.8.7
+            signed_request.headers['Content-MD5'].should == Base64.encode64(Digest::MD5.digest("hellow\nworld")).strip
           end
         end
 
@@ -270,7 +300,8 @@ describe "ApiAuth" do
               'CONTENT_TYPE' => 'text/plain',
               'HTTP_DATE' => 'Mon, 23 Jan 1984 03:29:56 GMT')
             signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
-            signed_request.env['Content-MD5'].should == Digest::MD5.base64digest('')
+            # signed_request.env['Content-MD5'].should == Digest::MD5.base64digest('') => Doesn't work in ruby 1.8.7
+            signed_request.env['Content-MD5'].should == Base64.encode64(Digest::MD5.digest('')).strip
           end
 
           it "should calculate for real content" do
@@ -282,7 +313,8 @@ describe "ApiAuth" do
               'HTTP_DATE' => 'Mon, 23 Jan 1984 03:29:56 GMT',
               'RAW_POST_DATA' => "hello\nworld")
             signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
-            signed_request.env['Content-MD5'].should == Digest::MD5.base64digest("hello\nworld")
+            # signed_request.env['Content-MD5'].should == Digest::MD5.base64digest("hello\nworld") => Doesn't work in ruby 1.8.7
+            signed_request.env['Content-MD5'].should == Base64.encode64(Digest::MD5.digest("hello\nworld")).strip
           end
 
         end
@@ -350,7 +382,8 @@ describe "ApiAuth" do
                         'Date' => "Mon, 23 Jan 1984 03:29:56 GMT" }
             request = Rack::Request.new(Rack::MockRequest.env_for("/resource.xml?foo=bar&bar=foo", :method => :put).merge!(headers))
             signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
-            signed_request.env['Content-MD5'].should == Digest::MD5.base64digest('')
+            # signed_request.env['Content-MD5'].should == Digest::MD5.base64digest('') => Doesn't work in ruby 1.8.7
+            signed_request.env['Content-MD5'].should == Base64.encode64(Digest::MD5.digest('')).strip
           end
 
           it "should calculate for real content" do
@@ -358,7 +391,8 @@ describe "ApiAuth" do
                         'Date' => "Mon, 23 Jan 1984 03:29:56 GMT" }
             request = Rack::Request.new(Rack::MockRequest.env_for("/resource.xml?foo=bar&bar=foo", :method => :put, :input => "hellow\nworld").merge!(headers))
             signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
-            signed_request.env['Content-MD5'].should == Digest::MD5.base64digest("hellow\nworld")
+            # signed_request.env['Content-MD5'].should == Digest::MD5.base64digest("hellow\nworld") => Doesn't work in ruby 1.8.7
+            signed_request.env['Content-MD5'].should == Base64.encode64(Digest::MD5.digest("hellow\nworld")).strip
           end
         end
 
