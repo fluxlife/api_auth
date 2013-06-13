@@ -1,5 +1,7 @@
 # ApiAuth #
 
+(Original code from: mgomes/api_auth)
+
 Logins and passwords are for humans. Communication between applications need to
 be protected through different means.
 
@@ -23,7 +25,7 @@ content-MD5 are not present, then a blank string is used in their place. If the
 timestamp isn't present, a valid HTTP date is automatically added to the
 request. The canonical string string is computed as follows:
 
-    canonical_string = 'content-type,content-MD5,request URI,timestamp'
+    canonical_string = 'content-type,content-MD5,request URI,timestamp,method'
 
 2. This string is then used to create the signature which is a Base64 encoded
 SHA1 HMAC, using the client's private secret key.
@@ -65,7 +67,7 @@ Here is the current list of supported request objects:
 
 * Net::HTTP
 * ActionController::Request
-* Curb (Curl::Easy)
+* Curb (Curl::Easy) (Some features limited - no support for Content-MD5 or Request-Method in HMAC String)
 * RestClient
 
 ### HTTP Client Objects ###
@@ -97,6 +99,13 @@ To sign that request, simply call the `sign!` method as follows:
 ``` ruby
     @signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
 ```
+
+You can also generate timestamp nonces to prevent replay attacks:
+
+``` ruby
+    @signed_request = ApiAuth.sign!(@request,@access_id,@secret_key, :use_nonce=>true)
+```
+
 
 The proper `Authorization` request header has now been added to that request
 object and it's ready to be transmitted. It's recommended that you sign the
@@ -134,6 +143,19 @@ To validate whether or not a request is authentic:
     ApiAuth.authentic?(signed_request, secret_key)
 ```
 
+If you want to further protect yourself from replay attacks, you can add custom
+ttl's on request to verify the request is not old:
+
+``` ruby
+    ApiAuth.authentic?(signed_request, secret_key, :ttl=>4.minutes.to_i) #in seconds
+```
+
+If you generated a nonce in the client, you can verify the nonce matches the timestamp:
+
+``` ruby
+    ApiAuth.authentic?(signed_request, secret_key, :check_nonce=>true) #in seconds
+```
+
 If your server is a Rails app, the signed request will be the `request` object.
 
 In order to obtain the secret key for the client, you first need to look up the
@@ -161,6 +183,14 @@ Rails app:
     end
 ```
 
+If you are using nonce's you can also get the nonce value:
+
+```ruby
+    ApiAuth.nonce_value(signed_request)
+```
+
+With that data you can persist the nonces and make sure that nonce is never reused.
+
 ## Development ##
 
 ApiAuth uses bundler for gem dependencies and RSpec for testing. Developing the
@@ -169,7 +199,7 @@ take care of all that for you.
 
 To run the tests:
 
-    rake spec
+    bundle exec rake spec
 
 If you'd like to add support for additional HTTP clients, check out the already
 implemented drivers in `lib/api_auth/request_drivers` for reference. All of
@@ -177,6 +207,10 @@ the public methods for each driver are required to be implemented by your driver
 
 ## Authors ##
 
+This fork:
+* [J.R. Smith](http://github.com/fluxlife)
+
+Original Authors:
 * [Mauricio Gomes](http://github.com/mgomes)
 * [Kevin Glowacz](http://github.com/kjg)
 
