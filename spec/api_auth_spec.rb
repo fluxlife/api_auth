@@ -40,12 +40,12 @@ describe "ApiAuth" do
           'content-type' => 'text/plain', 
           'content-md5' => '1B2M2Y8AsgTpgAmY7PhCfg==',
           'date' => Time.now.utc.httpdate)
+        @signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+
         @request_with_nonce = Net::HTTP::Put.new("/resource.xml?foo=bar&bar=foo", 
           'content-type' => 'text/plain', 
           'content-md5' => '1B2M2Y8AsgTpgAmY7PhCfg==',
           'date' => Time.now.utc.httpdate)
-
-        @signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
         @signed_request_with_nonce = ApiAuth.sign!(@request_with_nonce, @access_id, @secret_key, :use_nonce=>true)
       end
 
@@ -85,7 +85,7 @@ describe "ApiAuth" do
       end
 
       it "should sign the request with a nonce" do
-        @signed_request_with_nonce['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request)}&NONCE:#{ApiAuth.generate_nonce(@request, @secret_key)}"
+        @signed_request_with_nonce['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request_with_nonce)}&NONCE:#{ApiAuth.generate_nonce(@request_with_nonce, @secret_key)}"
       end
 
       it "should authenticate a valid request" do
@@ -102,7 +102,6 @@ describe "ApiAuth" do
 
       it "should NOT authenticate a valid request with an invalid nonce" do
         @signed_request_with_nonce["DATE"] = 1.second.from_now.utc.httpdate
-        puts @signed_request_with_nonce["DATE"]
         ApiAuth.authentic?(@signed_request_with_nonce, @secret_key).should be_false
       end
 
@@ -132,6 +131,10 @@ describe "ApiAuth" do
         ApiAuth.access_id(@signed_request).should == "1044"
       end
 
+      it "should retrieve the nonce_value" do
+        ApiAuth.nonce_value(@signed_request_with_nonce).should == ApiAuth.generate_nonce(@request_with_nonce,@secret_key)
+      end
+
     end
 
     describe "with RestClient" do
@@ -144,6 +147,16 @@ describe "ApiAuth" do
           :headers => headers,
           :method => :put)
         @signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+
+        #  Need to create specific set of headers because identical RestClient requests get merged
+        #  into one request.
+        nonce_headers = { 'Content-MD5' => "1B2M2Y8AsgTpgAmY7PhCfg==",
+                    'Content-Type' => "text/plain",
+                    'Date' => 5.seconds.ago.utc.httpdate }
+        @request_with_nonce =RestClient::Request.new(:url => "/resource.xml?foo=bar&bar=foo", 
+          :headers => nonce_headers,
+          :method => :put)
+        @signed_request_with_nonce = ApiAuth.sign!(@request_with_nonce, @access_id, @secret_key, :use_nonce=>true)
       end
 
       it "should return a RestClient object after signing it" do
@@ -185,12 +198,25 @@ describe "ApiAuth" do
         @signed_request.headers['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request)}"
       end
 
+      it "should sign the request with a nonce" do
+        @signed_request_with_nonce.headers['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request_with_nonce)}&NONCE:#{ApiAuth.generate_nonce(@request_with_nonce, @secret_key)}"
+      end      
+
       it "should authenticate a valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key).should be_true
       end
 
+      it "should authenticate a valid request with a nonce" do
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key, :check_nonce=>true).should be_true
+      end
+
       it "should NOT authenticate a non-valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key+'j').should be_false
+      end
+
+      it "should NOT authenticate a valid request with an invalid nonce" do
+        @signed_request_with_nonce.headers["DATE"] = 1.second.from_now.utc.httpdate
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key).should be_false
       end
 
       it "should NOT authenticate a mismatched content-md5 when body has changed" do
@@ -210,9 +236,19 @@ describe "ApiAuth" do
         signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
         ApiAuth.authentic?(signed_request, @secret_key).should be_false
       end
+
+      it "should NOT authenticate a custom expired request" do
+        @request.headers['Date'] = 5.minutes.ago.utc.httpdate
+        signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+        ApiAuth.authentic?(signed_request, @secret_key, :ttl=>4.minutes.to_i).should be_false
+      end
       
       it "should retrieve the access_id" do
         ApiAuth.access_id(@signed_request).should == "1044"
+      end
+
+      it "should retrieve the nonce_value" do
+        ApiAuth.nonce_value(@signed_request_with_nonce).should == ApiAuth.generate_nonce(@request_with_nonce,@secret_key)
       end
 
     end
@@ -227,6 +263,17 @@ describe "ApiAuth" do
           curl.headers = headers
         end
         @signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+
+
+        #  Need to create specific set of headers because identical RestClient requests get merged
+        #  into one request.
+        nonce_headers = { 'Content-MD5' => "e59ff97941044f85df5297e1c302d260",
+                    'Content-Type' => "text/plain",
+                    'Date' => 5.seconds.ago.utc.httpdate }
+        @request_with_nonce = Curl::Easy.new("/resource.xml?foo=bar&bar=foo") do |curl|
+          curl.headers = nonce_headers
+        end
+        @signed_request_with_nonce = ApiAuth.sign!(@request_with_nonce, @access_id, @secret_key, :use_nonce=>true)
       end
 
       it "should return a Curl::Easy object after signing it" do
@@ -253,12 +300,25 @@ describe "ApiAuth" do
         @signed_request.headers['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request)}"
       end
 
+      it "should sign the request with a nonce" do
+        @signed_request_with_nonce.headers['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request_with_nonce)}&NONCE:#{ApiAuth.generate_nonce(@request_with_nonce, @secret_key)}"
+      end
+
       it "should authenticate a valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key).should be_true
       end
 
+      it "should authenticate a valid request with a nonce" do
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key, :check_nonce=>true).should be_true
+      end
+
       it "should NOT authenticate a non-valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key+'j').should be_false
+      end
+
+      it "should NOT authenticate a valid request with an invalid nonce" do
+        @signed_request_with_nonce.headers["DATE"] = 1.second.from_now.utc.httpdate
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key).should be_false
       end
 
       it "should NOT authenticate an expired request" do
@@ -266,9 +326,19 @@ describe "ApiAuth" do
         signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
         ApiAuth.authentic?(signed_request, @secret_key).should be_false
       end
+
+      it "should NOT authenticate a custom expired request" do
+        @request.headers['Date'] = 5.minutes.ago.utc.httpdate
+        signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+        ApiAuth.authentic?(signed_request, @secret_key, :ttl=>4.minutes.to_i).should be_false
+      end
       
       it "should retrieve the access_id" do
         ApiAuth.access_id(@signed_request).should == "1044"
+      end
+
+      it "should retrieve the nonce_value" do
+        ApiAuth.nonce_value(@signed_request_with_nonce).should == ApiAuth.generate_nonce(@request_with_nonce,@secret_key)
       end
 
     end
@@ -284,6 +354,15 @@ describe "ApiAuth" do
           'CONTENT_TYPE' => 'text/plain',
           'HTTP_DATE' => Time.now.utc.httpdate)
         @signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+
+        @request_with_nonce = ActionController::Request.new(
+          'PATH_INFO' => '/resource.xml',
+          'QUERY_STRING' => 'foo=bar&bar=foo',
+          'REQUEST_METHOD' => 'PUT',
+          'CONTENT_MD5' => '1B2M2Y8AsgTpgAmY7PhCfg==',
+          'CONTENT_TYPE' => 'text/plain',
+          'HTTP_DATE' => Time.now.utc.httpdate)
+        @signed_request_with_nonce = ApiAuth.sign!(@request_with_nonce, @access_id, @secret_key, :use_nonce=>true)        
       end
 
       it "should return a ActionController::Request object after signing it" do
@@ -328,12 +407,25 @@ describe "ApiAuth" do
         @signed_request.env['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request)}"
       end
 
+      it "should sign the request with a nonce" do
+        @signed_request_with_nonce.env['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request_with_nonce)}&NONCE:#{ApiAuth.generate_nonce(@request_with_nonce, @secret_key)}"
+      end
+
       it "should authenticate a valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key).should be_true
       end
 
+      it "should authenticate a valid request with a nonce" do
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key, :check_nonce=>true).should be_true
+      end
+
       it "should NOT authenticate a non-valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key+'j').should be_false
+      end
+
+      it "should NOT authenticate a valid request with an invalid nonce" do
+        @signed_request_with_nonce.env["DATE"] = 1.second.from_now.utc.httpdate
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key).should be_false
       end
 
       it "should NOT authenticate a mismatched content-md5 when body has changed" do
@@ -355,8 +447,18 @@ describe "ApiAuth" do
         ApiAuth.authentic?(signed_request, @secret_key).should be_false
       end
 
+      it "should NOT authenticate a custom expired request" do
+        @request.env['Date'] = 5.minutes.ago.utc.httpdate
+        signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+        ApiAuth.authentic?(signed_request, @secret_key, :ttl=>4.minutes.to_i).should be_false
+      end
+
       it "should retrieve the access_id" do
         ApiAuth.access_id(@signed_request).should == "1044"
+      end
+
+      it "should retrieve the nonce_value" do
+        ApiAuth.nonce_value(@signed_request_with_nonce).should == ApiAuth.generate_nonce(@request_with_nonce,@secret_key)
       end
 
     end
@@ -369,6 +471,9 @@ describe "ApiAuth" do
                     'Date' => Time.now.utc.httpdate }
         @request = Rack::Request.new(Rack::MockRequest.env_for("/resource.xml?foo=bar&bar=foo", :method => :put).merge!(headers))
         @signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+
+        @request_with_nonce = Rack::Request.new(Rack::MockRequest.env_for("/resource.xml?foo=bar&bar=foo", :method => :put).merge!(headers))
+        @signed_request_with_nonce = ApiAuth.sign!(@request_with_nonce, @access_id, @secret_key, :use_nonce=>true)
       end
 
       it "should return a Rack::Request object after signing it" do
@@ -405,12 +510,25 @@ describe "ApiAuth" do
         @signed_request.env['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request)}"
       end
 
+      it "should sign the request with a nonce" do
+        @signed_request_with_nonce.env['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request_with_nonce)}&NONCE:#{ApiAuth.generate_nonce(@request_with_nonce, @secret_key)}"
+      end
+
       it "should authenticate a valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key).should be_true
       end
 
+      it "should authenticate a valid request with a nonce" do
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key, :check_nonce=>true).should be_true
+      end
+
       it "should NOT authenticate a non-valid request" do
         ApiAuth.authentic?(@signed_request, @secret_key+'j').should be_false
+      end
+
+      it "should NOT authenticate a valid request with an invalid nonce" do
+        @signed_request_with_nonce.env["DATE"] = 1.second.from_now.utc.httpdate
+        ApiAuth.authentic?(@signed_request_with_nonce, @secret_key).should be_false
       end
 
       it "should NOT authenticate a mismatched content-md5 when body has changed" do
@@ -429,9 +547,19 @@ describe "ApiAuth" do
         signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
         ApiAuth.authentic?(signed_request, @secret_key).should be_false
       end
+
+      it "should NOT authenticate a custom expired request" do
+        @request.env['Date'] = 5.minutes.ago.utc.httpdate
+        signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+        ApiAuth.authentic?(signed_request, @secret_key, :ttl=>4.minutes.to_i).should be_false
+      end
       
       it "should retrieve the access_id" do
         ApiAuth.access_id(@signed_request).should == "1044"
+      end
+
+      it "should retrieve the nonce_value" do
+        ApiAuth.nonce_value(@signed_request_with_nonce).should == ApiAuth.generate_nonce(@request_with_nonce,@secret_key)
       end
 
     end
