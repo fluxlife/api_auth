@@ -21,19 +21,20 @@ module ApiAuth
     # access_id: The public unique identifier for the client
     #
     # secret_key: assigned secret key that is known to both parties
-    def sign!(request, access_id, secret_key)
+    def sign!(request, access_id, secret_key, options={})
       headers = Headers.new(request)
       headers.calculate_md5
       headers.set_date
-      headers.sign_header auth_header(request, access_id, secret_key)
+      headers.sign_header auth_header(request, access_id, secret_key, options[:use_nonce])
     end
 
     # Determines if the request is authentic given the request and the client's
     # secret key. Returns true if the request is authentic and false otherwise.
-    def authentic?(request, secret_key)
+    def authentic?(request, secret_key, options={})
       return false if secret_key.nil?
-
-      return !md5_mismatch?(request) && signatures_match?(request, secret_key) && !request_too_old?(request)
+      authentic = !md5_mismatch?(request) && signatures_match?(request, secret_key) && !request_too_old?(request, options[:ttl])
+      authentic = nonce_matches?(request, secret_key) if authentic && options[:check_nonce]
+      authentic
     end
 
     # Returns the access id from the request's authorization header
@@ -41,6 +42,15 @@ module ApiAuth
       headers = Headers.new(request)
       if match_data = parse_auth_header(headers.authorization_header)
         return match_data[1]
+      end
+
+      nil
+    end
+
+    def nonce_value(request)
+      headers = Headers.new(request)
+      if match_data = parse_auth_header(headers.authorization_header)
+        return match_data[4]
       end
 
       nil
@@ -55,12 +65,19 @@ module ApiAuth
       b64_encode(Digest::SHA2.new(512).digest(random_bytes))
     end
 
+    def generate_nonce(request, secret_key)
+      header = Headers.new(request)
+      digest = OpenSSL::Digest::Digest.new('sha1')
+      b64_encode(OpenSSL::HMAC.digest(digest, secret_key, header.timestamp))
+    end
+
   private
 
-    def request_too_old?(request)
+    def request_too_old?(request, ttl=nil)
+      #default ttl = 900 seconds => 15 minutes
+      ttl ||= 900
       headers = Headers.new(request)
-      # 900 seconds is 15 minutes
-      Time.parse(headers.timestamp).utc < (Time.now.utc - 900)
+      Time.parse(headers.timestamp).utc < (Time.now.utc - ttl)
     end
 
     def md5_mismatch?(request)
@@ -77,6 +94,16 @@ module ApiAuth
       false
     end
 
+    def nonce_matches?(request, secret_key)
+      headers = Headers.new(request)
+      match_data = parse_auth_header(headers.authorization_header)
+      if match_data = parse_auth_header(headers.authorization_header)
+        nonce = match_data[4]
+        return nonce == nonce_signature(request, secret_key)
+      end
+      false
+    end
+
     def hmac_signature(request, secret_key)
       headers = Headers.new(request)
       canonical_string = headers.canonical_string
@@ -84,12 +111,23 @@ module ApiAuth
       b64_encode(OpenSSL::HMAC.digest(digest, secret_key, canonical_string))
     end
 
-    def auth_header(request, access_id, secret_key)
-      "APIAuth #{access_id}:#{hmac_signature(request, secret_key)}"
+    def nonce_signature(request, secret_key)
+      headers = Headers.new(request)
+      timestamp = headers.timestamp
+      digest = OpenSSL::Digest::Digest.new('sha1')
+      b64_encode(OpenSSL::HMAC.digest(digest, secret_key, headers.timestamp))
+    end
+
+    def auth_header(request, access_id, secret_key, use_nonce=false)
+      auth_header = "APIAuth #{access_id}:#{hmac_signature(request, secret_key)}"
+      auth_header += "&NONCE:#{generate_nonce(request, secret_key)}" if use_nonce == true
+      auth_header
     end
 
     def parse_auth_header(auth_header)
-      Regexp.new("APIAuth ([^:]+):(.+)$").match(auth_header)
+      # Includes NONCE parsing, but keeps match same auth parsing as before.
+      # i.e. match[1] and match[2] should always be the auth header key, value.
+      Regexp.new("APIAuth ([^:]+):(.+?)(?:&|$)(NONCE:)?(.+?)?$").match(auth_header)
     end
 
   end # class methods

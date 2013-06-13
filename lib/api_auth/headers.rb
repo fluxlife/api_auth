@@ -40,10 +40,12 @@ module ApiAuth
 
     # Returns the canonical string computed from the request's headers
     def canonical_string
-      [ @request.content_type,
+      [ 
+        @request.content_type,
         @request.content_md5,
         @request.request_uri.gsub(/http:\/\/[^(,|\?|\/)]*/,''), # remove host
-        @request.timestamp
+        @request.timestamp,
+        @request.method
       ].join(",")
     end
 

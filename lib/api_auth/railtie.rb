@@ -11,11 +11,20 @@ module ApiAuth
         def get_api_access_id_from_request
           ApiAuth.access_id(request)
         end
-        
-        def api_authenticated?(secret_key)
-          ApiAuth.authentic?(request, secret_key)
+
+        def get_nonce_from_request
+          ApiAuth.nonce_value(request)
         end
         
+        def api_authenticated?(secret_key)
+          ApiAuth.authentic?(request, secret_key, :check_nonce=>false)
+        end
+
+        def api_authenticated_with_nonce(secret_key)
+          ApiAuth.authentic?(request, secret_key, :check_nonce=>true)
+        end
+
+
       end
       
       unless defined?(ActionController)
@@ -47,20 +56,23 @@ module ApiAuth
             base.class_attribute :hmac_access_id
             base.class_attribute :hmac_secret_key
             base.class_attribute :use_hmac
+            base.class_attribute :use_nonce
           else
             base.class_inheritable_accessor :hmac_access_id            
             base.class_inheritable_accessor :hmac_secret_key            
-            base.class_inheritable_accessor :use_hmac            
+            base.class_inheritable_accessor :use_hmac
+            base.class_inheritable_accessor :use_nonce
           end
         
         end
       
         module ClassMethods
 
-          def with_api_auth(access_id, secret_key)
+          def with_api_auth(access_id, secret_key, options={})
             self.hmac_access_id = access_id
             self.hmac_secret_key = secret_key
             self.use_hmac = true
+            self.use_nonce = options[:use_nonce].present? ? options[:use_nonce] : false
           
             class << self
               alias_method_chain :connection, :auth
@@ -72,6 +84,7 @@ module ApiAuth
             c.hmac_access_id = self.hmac_access_id
             c.hmac_secret_key = self.hmac_secret_key
             c.use_hmac = self.use_hmac
+            c.use_nonce = self.use_nonce
             c
           end   
                
@@ -81,13 +94,13 @@ module ApiAuth
         end
       
       end # BaseApiAuth
-    
-      module Connection
       
+      module Connection
+        
         def self.included(base)
           base.send :alias_method_chain, :request, :auth
           base.class_eval do
-            attr_accessor :hmac_secret_key, :hmac_access_id, :use_hmac
+            attr_accessor :hmac_secret_key, :hmac_access_id, :use_hmac, :use_nonce
           end
         end
 
@@ -96,12 +109,11 @@ module ApiAuth
             h = arguments.last
             tmp = "Net::HTTP::#{method.to_s.capitalize}".constantize.new(path, h)
             tmp.body = arguments[0] if arguments.length > 1
-            ApiAuth.sign!(tmp, hmac_access_id, hmac_secret_key)
+            ApiAuth.sign!(tmp, hmac_access_id, hmac_secret_key, :use_nonce=>use_nonce)
             arguments.last['Content-MD5'] = tmp['Content-MD5'] if tmp['Content-MD5']
             arguments.last['DATE'] = tmp['DATE']
             arguments.last['Authorization'] = tmp['Authorization']
           end
-        
           request_without_auth(method, path, *arguments)
         end
       
