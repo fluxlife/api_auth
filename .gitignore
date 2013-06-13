@@ -42,3 +42,7 @@ pkg
 #
 # For vim:
 #*.swp
+
+api_key.sublime-project
+
+api_key.sublime-workspace
