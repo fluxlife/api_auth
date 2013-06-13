@@ -24,7 +24,10 @@ module ApiAuth
         else
           body = ''
         end
-        Digest::MD5.base64digest(body)
+        # This doesn't work in ruby 1.8.7 (ree):
+        # 
+        # Digest::MD5.base64digest(body)
+        Base64.encode64(Digest::MD5.digest(body)).strip
       end
 
       def populate_content_md5
@@ -70,6 +73,10 @@ module ApiAuth
 
       def authorization_header
         find_header %w(Authorization AUTHORIZATION HTTP_AUTHORIZATION)
+      end
+
+      def method
+        @request.request_method.to_s.upcase
       end
 
     private

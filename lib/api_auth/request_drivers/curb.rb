@@ -57,6 +57,10 @@ module ApiAuth
         find_header %w(Authorization AUTHORIZATION HTTP_AUTHORIZATION)
       end
 
+      def method
+        nil # doesn't appear to be possible
+      end
+
     private
 
       def find_header(keys)
